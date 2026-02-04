@@ -46,7 +46,7 @@ def load_data():
     try:
         physicians = pd.read_csv('/mnt/user-data/uploads/Physicians_Indicators_Anonymized.csv')
         dept_2023 = pd.read_csv('All_Departments_2023.csv', low_memory=False)
-        dept_2024 = pd.read_csv('/mnt/user-data/uploads/All_Departments_2024.csv', low_memory=False)
+        dept_2024 = pd.read_csv('All_Departments_2024.csv', low_memory=False)
         dept_2025 = pd.read_csv('/mnt/user-data/uploads/All_Departments_2025.csv', low_memory=False)
         
         # Combine department data
