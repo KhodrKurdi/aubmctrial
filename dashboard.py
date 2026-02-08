@@ -425,7 +425,6 @@ elif page == "👨‍⚕️ Physician Performance":
         st.subheader("📌 Selected Physician Summary")
 
         base = eval_f.copy()
-        base["_is_negative"] = base["Response_Numeric"] <= 2
         
         # -------------------------
         # Physician-level statistics
@@ -436,7 +435,6 @@ elif page == "👨‍⚕️ Physician Performance":
                 Evaluations=("Response_Numeric", "size"),
                 Avg_Score=("Response_Numeric", "mean"),
                 Std_Score=("Response_Numeric", "std"),
-                Negative_Rate=("_is_negative", "mean"),
             )
             .reset_index()
         )
@@ -444,7 +442,6 @@ elif page == "👨‍⚕️ Physician Performance":
         # Format
         phys_stats["Avg_Score"] = phys_stats["Avg_Score"].round(2)
         phys_stats["Std_Score"] = phys_stats["Std_Score"].round(2)
-        phys_stats["Negative_Rate"] = (phys_stats["Negative_Rate"] * 100).round(1)
         
         # -------------------------
         # Join operational indicators
@@ -480,7 +477,7 @@ elif page == "👨‍⚕️ Physician Performance":
             indicators = indicators.groupby("Subject ID", as_index=False).agg(agg_dict)
             phys_stats = phys_stats.merge(indicators, on="Subject ID", how="left")
         
-        # Ensure columns always exist
+        # Ensure indicator columns always exist
         for col in ["Visits", "Avg_Waiting", "Complaints"]:
             if col not in phys_stats.columns:
                 phys_stats[col] = np.nan
@@ -497,7 +494,6 @@ elif page == "👨‍⚕️ Physician Performance":
             "Evaluations",
             "Avg_Score",
             "Std_Score",
-            "Negative_Rate",
             "Visits",
             "Avg_Waiting",
             "Complaints",
@@ -511,6 +507,7 @@ elif page == "👨‍⚕️ Physician Performance":
                 use_container_width=True,
                 hide_index=True
             )
+        
 
     st.markdown("---")
     st.subheader("💬 Comment Review (sample)")
