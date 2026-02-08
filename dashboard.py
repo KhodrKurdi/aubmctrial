@@ -54,6 +54,69 @@ def ensure_year(df_eval: pd.DataFrame) -> pd.DataFrame:
         df_eval["Year"] = df_eval[date_col].dt.year
     return df_eval
 
+import numpy as np
+import plotly.graph_objects as go
+
+def physician_score_summary(eval_df, selected_physician, selected_years, peer_scope="All"):
+    """
+    peer_scope:
+      - "All" = compare against all physicians in selected_years
+      - "Department" = compare against same department only (requires eval_df['Department'])
+    """
+    df = eval_df[eval_df["Year"].isin(selected_years)].copy()
+
+    # Physician slice
+    df_p = df[df["Subject ID"] == selected_physician].copy()
+
+    # If no data
+    if df_p.empty:
+        return None
+
+    # Physician "behavior score" (avg of Response_Numeric)
+    p_scores = df_p["Response_Numeric"].dropna()
+    p_avg = float(p_scores.mean())
+    p_std = float(p_scores.std(ddof=1)) if len(p_scores) > 1 else 0.0
+    p_min = float(p_scores.min())
+    p_max = float(p_scores.max())
+
+    # Build peer set
+    if peer_scope == "Department" and "Department" in df.columns:
+        # Get physician department (most common)
+        p_dept = df_p["Department"].mode().iloc[0] if df_p["Department"].notna().any() else None
+        if p_dept is not None:
+            peers = df[df["Department"] == p_dept]
+        else:
+            peers = df
+    else:
+        peers = df
+
+    # Peer avg score per physician (so we compare physician-to-physician, not per-row)
+    peer_means = (
+        peers.groupby("Subject ID")["Response_Numeric"]
+        .mean()
+        .dropna()
+        .values
+    )
+
+    # Percentile: % of physicians with mean <= this physician mean
+    # (This matches “better than X% of physicians” = percentile - 0? We'll compute both)
+    pct_rank = float((peer_means <= p_avg).mean() * 100)
+
+    # Overall peer average (for delta message)
+    overall_avg = float(np.mean(peer_means)) if len(peer_means) else np.nan
+    delta = p_avg - overall_avg
+
+    return {
+        "phys_avg": p_avg,
+        "phys_std": p_std,
+        "phys_min": p_min,
+        "phys_max": p_max,
+        "pct_rank": pct_rank,          # e.g., 31.7
+        "overall_avg": overall_avg,    # peer mean
+        "delta": delta                 # p_avg - overall_avg
+    }
+
+
 # =========================
 # DATA LOADING (CACHED)
 # =========================
@@ -240,6 +303,74 @@ elif page == "👨‍⚕️ Physician Performance":
     selected_phys = st.sidebar.selectbox("Physician", physicians_list)
 
     dfp = eval_f[eval_f["Subject ID"] == selected_phys].copy()
+    st.markdown("## Behavior Score Analysis")
+
+# Choose peer comparison scope
+peer_scope = st.radio(
+    "Compare percentile against:",
+    ["All", "Department"],
+    horizontal=True
+)
+
+summary = physician_score_summary(
+    eval_df=eval_f,  # the filtered eval dataframe by year(s)
+    selected_physician=selected_phys,
+    selected_years=selected_years,
+    peer_scope=peer_scope
+)
+
+if summary is None:
+    st.info("No evaluation data available for this physician in the selected years.")
+else:
+    left, right = st.columns([1.15, 1])
+
+    # --- LEFT: KPI cards ---
+    with left:
+        c1, c2 = st.columns(2)
+
+        with c1:
+            st.metric("Average Score", f"{summary['phys_avg']:.3f}")
+            st.metric("Min Score", f"{summary['phys_min']:.3f}")
+
+        with c2:
+            st.metric("Standard Deviation", f"{summary['phys_std']:.3f}")
+            st.metric("Max Score", f"{summary['phys_max']:.3f}")
+
+        # Delta message (below/above average)
+        delta = summary["delta"]
+        if not np.isnan(delta):
+            if delta < 0:
+                st.warning(f"{abs(delta):.3f} points below peer average")
+            else:
+                st.success(f"{abs(delta):.3f} points above peer average")
+
+    # --- RIGHT: Percentile Gauge ---
+    with right:
+        pct_rank = summary["pct_rank"]
+
+        fig_gauge = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=pct_rank,
+            number={"suffix": "%"},
+            title={"text": "Percentile Rank"},
+            gauge={
+                "axis": {"range": [0, 100]},
+                "steps": [
+                    {"range": [0, 20]},
+                    {"range": [20, 40]},
+                    {"range": [40, 60]},
+                    {"range": [60, 80]},
+                    {"range": [80, 100]},
+                ],
+                "threshold": {"line": {"width": 4}, "value": pct_rank}
+            }
+        ))
+
+        fig_gauge.update_layout(height=320, margin=dict(l=20, r=20, t=60, b=10))
+        st.plotly_chart(fig_gauge, use_container_width=True)
+
+        st.info(f"Better than **{pct_rank:.1f}%** of physicians ({peer_scope.lower()} comparison).")
+
 
     # Physician indicators row (visits, waiting, complaints)
     phys_row = phys_f[phys_f["Subject ID"] == selected_phys].copy()
