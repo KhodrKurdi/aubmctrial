@@ -422,91 +422,71 @@ elif page == "👨‍⚕️ Physician Performance":
         st.plotly_chart(fig_resp, use_container_width=True)
 
     with col2:
-        st.subheader("📉 Biggest Drop vs Peers (Question Gap vs Department Avg)")
+        st.subheader("🚨 Outlier Detection (IQR Method) — Score Anomalies")
 
-        # Choose peer scope for the gap
-        peer_scope_gap = st.radio(
-            "Peer baseline for gap:",
-            ["Same Department", "All Physicians"],
-            horizontal=True,
-            key="peer_gap_scope"
+        # Choose the variable to run IQR on (default = Response_Numeric)
+        value_col = st.selectbox(
+            "Detect outliers on:",
+            options=["Response_Numeric"],
+            index=0,
+            help="IQR outlier detection is applied to the selected numeric measure."
         )
         
-        min_n_phys = st.slider(
-            "Minimum responses per question (physician) to include",
-            min_value=3, max_value=30, value=5, step=1
-        )
+        series = dfp[value_col].dropna()
         
-        min_n_peers = st.slider(
-            "Minimum responses per question (peers) to include",
-            min_value=10, max_value=200, value=30, step=5
-        )
-        
-        # Determine peer dataframe
-        if peer_scope_gap == "Same Department" and "Department" in dfp.columns:
-            dept_val = dfp["Department"].mode().iloc[0] if dfp["Department"].notna().any() else None
-            peers_df = eval_f[eval_f["Department"] == dept_val] if dept_val is not None else eval_f
+        if len(series) < 10:
+            st.info("Not enough data points to run IQR outlier detection (need at least ~10).")
         else:
-            peers_df = eval_f
+            q1 = series.quantile(0.25)
+            q3 = series.quantile(0.75)
+            iqr = q3 - q1
         
-        # Physician question-level stats
-        phys_q = (
-            dfp.groupby("Question")["Response_Numeric"]
-            .agg(phys_mean="mean", phys_n="size")
-            .reset_index()
-        )
+            # Protect against iqr = 0 (all values identical)
+            if iqr == 0:
+                st.info("IQR is 0 (values are identical). Outlier detection is not meaningful here.")
+            else:
+                k = st.slider("IQR multiplier (k)", 1.0, 3.0, 1.5, 0.1, help="Standard is 1.5. Higher = fewer outliers flagged.")
+                lower = q1 - k * iqr
+                upper = q3 + k * iqr
         
-        # Peer question-level stats
-        peer_q = (
-            peers_df.groupby("Question")["Response_Numeric"]
-            .agg(peer_mean="mean", peer_n="size")
-            .reset_index()
-        )
+                outliers = dfp[(dfp[value_col] < lower) | (dfp[value_col] > upper)].copy()
+                outlier_count = len(outliers)
+                outlier_pct = (outlier_count / len(dfp) * 100) if len(dfp) else 0
         
-        gap = phys_q.merge(peer_q, on="Question", how="inner")
-        gap = gap[(gap["phys_n"] >= min_n_phys) & (gap["peer_n"] >= min_n_peers)].copy()
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Q1", f"{q1:.2f}")
+                c2.metric("Q3", f"{q3:.2f}")
+                c3.metric("Lower / Upper Bound", f"{lower:.2f} / {upper:.2f}")
+                c4.metric("Outliers", f"{outlier_count} ({outlier_pct:.1f}%)")
         
-        if gap.empty:
-            st.info("Not enough data to compute gaps with the current thresholds. Lower the minimum response filters.")
-        else:
-            gap["gap_vs_peers"] = gap["phys_mean"] - gap["peer_mean"]  # negative = worse than peers
-            gap = gap.sort_values("gap_vs_peers").head(10)
-        
-            # Create compact labels (Q001, Q002...) + hover shows full question
-            gap = gap.reset_index(drop=True)
-            gap["Q_ID"] = ["Q" + str(i+1).zfill(3) for i in range(len(gap))]
-        
-            fig_gap = px.bar(
-                gap,
-                y="Q_ID",
-                x="gap_vs_peers",
-                orientation="h",
-                labels={"gap_vs_peers": "Gap vs Peers (Physician - Peer Avg)", "Q_ID": "Question"},
-                hover_data={
-                    "Question": True,
-                    "phys_mean": ":.2f",
-                    "peer_mean": ":.2f",
-                    "phys_n": True,
-                    "peer_n": True,
-                    "gap_vs_peers": ":.2f",
-                },
-            )
-            fig_gap.update_layout(height=420, showlegend=False)
-            st.plotly_chart(fig_gap, use_container_width=True)
-        
-            with st.expander("📋 View full details"):
-                st.dataframe(
-                    gap[["Q_ID", "Question", "phys_mean", "peer_mean", "gap_vs_peers", "phys_n", "peer_n"]]
-                    .rename(columns={
-                        "phys_mean": "Phys Avg",
-                        "peer_mean": "Peer Avg",
-                        "gap_vs_peers": "Gap",
-                        "phys_n": "Phys N",
-                        "peer_n": "Peer N",
-                    }),
-                    use_container_width=True,
-                    hide_index=True
+                # --- Box plot ---
+                fig_box = px.box(
+                    dfp,
+                    y=value_col,
+                    points="outliers",
+                    title="Box Plot with Outliers"
                 )
+                fig_box.update_layout(height=320)
+                st.plotly_chart(fig_box, use_container_width=True)
+        
+                # --- Histogram with IQR bounds ---
+                fig_hist = px.histogram(
+                    dfp,
+                    x=value_col,
+                    nbins=12,
+                    title="Score Distribution with IQR Cutoffs"
+                )
+                fig_hist.add_vline(x=lower, line_width=2, line_dash="dash", annotation_text="Lower bound")
+                fig_hist.add_vline(x=upper, line_width=2, line_dash="dash", annotation_text="Upper bound")
+                fig_hist.update_layout(height=320)
+                st.plotly_chart(fig_hist, use_container_width=True)
+        
+                # Optional: show outlier rows
+                with st.expander("View outlier records"):
+                    show_cols = ["Year", "Raters Group", "Response", "Response_Numeric", comment_col]
+                    show_cols = [c for c in show_cols if c in dfp.columns]
+                    st.dataframe(outliers[show_cols].sort_values(value_col), use_container_width=True, hide_index=True)
+
 
     st.markdown("---")
     st.subheader("💬 Comment Review (sample)")
@@ -581,69 +561,6 @@ elif page == "🏢 Department Analytics":
     fig_rg = px.bar(rg, x="Rater Group", y="Count")
     fig_rg.update_layout(height=330, xaxis_tickangle=35, showlegend=False)
     st.plotly_chart(fig_rg, use_container_width=True)
-
-    st.subheader("💬 Top Negative Comment Themes (Keyword Buckets)")
-    
-    # Define keyword buckets (edit anytime)
-    THEMES = {
-        "Communication": ["communicat", "explain", "listen", "clarif", "rude", "respect", "tone"],
-        "Timeliness / Responsiveness": ["late", "delay", "time", "wait", "respond", "response", "paging", "call"],
-        "Professionalism / Conduct": ["professional", "unprofessional", "ethic", "behavior", "attitude", "harass"],
-        "Teamwork / Collaboration": ["team", "cowork", "nurse", "staff", "colleague", "collabor"],
-        "Patient Care / Safety": ["care", "safe", "safety", "mistake", "error", "risk", "quality"],
-        "Empathy / Compassion": ["empath", "compassion", "kind", "caring", "concern", "family"],
-        "Privacy / Confidentiality": ["privacy", "confidential", "hipaa", "overhear", "hallway", "elevator"],
-    }
-    
-    # Choose what counts as "negative"
-    neg_def = st.selectbox(
-        "Define negative comments as:",
-        ["Score <= 2", "Response in (Never/Hardly ever)"],
-        index=0
-    )
-    
-    tmp = dfp.copy()
-    tmp[comment_col] = tmp[comment_col].astype(str)
-    
-    if neg_def == "Score <= 2":
-        neg_comments = tmp[(tmp["Response_Numeric"] <= 2) & (tmp[comment_col].str.strip() != "")]
-    else:
-        neg_comments = tmp[(tmp["Response"].isin(["Never", "Hardly ever"])) & (tmp[comment_col].str.strip() != "")]
-    
-    if neg_comments.empty:
-        st.info("No negative comments found for this physician under the selected definition.")
-    else:
-        text = (neg_comments[comment_col].str.lower()).fillna("")
-    
-        # Count theme hits (simple “contains keyword” logic)
-        theme_counts = []
-        for theme, keys in THEMES.items():
-            hits = np.zeros(len(text), dtype=bool)
-            for k in keys:
-                hits |= text.str.contains(k, regex=False).values
-            theme_counts.append({"Theme": theme, "Mentions": int(hits.sum())})
-    
-        theme_df = pd.DataFrame(theme_counts).sort_values("Mentions", ascending=False)
-    
-        # Remove themes with 0 mentions (optional)
-        theme_df = theme_df[theme_df["Mentions"] > 0]
-    
-        if theme_df.empty:
-            st.info("No theme keywords matched the negative comments. We can refine the keyword list for your dataset wording.")
-        else:
-            fig_theme = px.bar(
-                theme_df,
-                x="Theme",
-                y="Mentions",
-                labels={"Mentions": "Number of Comments (matched)"},
-            )
-            fig_theme.update_layout(height=360, xaxis_tickangle=25, showlegend=False)
-            st.plotly_chart(fig_theme, use_container_width=True)
-    
-            with st.expander("🔎 Show example negative comments (first 15)"):
-                show_cols = ["Year", "Raters Group", "Response", "Response_Numeric", comment_col]
-                st.dataframe(neg_comments[show_cols].head(15), use_container_width=True, hide_index=True)
-    
 
     st.markdown("---")
     show_heatmap = st.checkbox("Show heatmap (slower on large data)")
