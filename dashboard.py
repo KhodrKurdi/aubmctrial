@@ -71,9 +71,9 @@ def load_data():
         # If the dataset has extra columns, usecols will ignore others safely
         return pd.read_csv(path, low_memory=False, usecols=lambda c: (c in eval_cols))
 
-    dept_2023 = read_eval("data/All_Departments_2023.csv")
-    dept_2024 = read_eval("data/All_Departments_2024.csv")
-    dept_2025 = read_eval("data/All_Departments_2025.csv")
+    dept_2023 = read_eval("All_Departments_2023.csv")
+    dept_2024 = read_eval("All_Departments_2024.csv")
+    dept_2025 = read_eval("All_Departments_2025.csv")
 
     eval_df = pd.concat([dept_2023, dept_2024, dept_2025], ignore_index=True)
     eval_df = ensure_year(eval_df)
@@ -84,7 +84,7 @@ def load_data():
         eval_df[date_col] = pd.to_datetime(eval_df[date_col], errors="coerce")
 
     # --- Physician indicators (visits, waiting time, complaints) ---
-    phys_df = pd.read_csv("data/Physicians_Indicators_Anonymized.csv")
+    phys_df = pd.read_csv("Physicians_Indicators_Anonymized.csv")
 
     # Map Aubnetid -> Subject ID (your earlier logic)
     if "Aubnetid" in phys_df.columns:
