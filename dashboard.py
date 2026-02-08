@@ -100,7 +100,7 @@ def load_data():
     # Optional: doctor-level aggregated stats (sentiment, negative comments, etc.)
     docstats = None
     try:
-        docstats = pd.read_csv("data/Doctor_Statistics_2025.csv")
+        docstats = pd.read_csv("Doctor_Statistics_2025.csv")
     except Exception:
         docstats = None
 
