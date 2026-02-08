@@ -424,14 +424,11 @@ elif page == "👨‍⚕️ Physician Performance":
     with col2:
         st.subheader("📌 Selected Physician Summary (Linked to Filter)")
 
-        # Build benchmark base
-        base = eval_f.copy()  # already filtered by years
-        
-        # Calculate helper flags
+        base = eval_f.copy()
         base["_has_comment"] = base[comment_col].notna() & (base[comment_col].astype(str).str.strip() != "")
         base["_is_negative"] = base["Response_Numeric"] <= 2
         
-        # Per-physician eval stats
+        # Per-physician evaluation stats (NO min/max)
         phys_stats = (
             base.groupby("Subject ID")
             .agg(
@@ -446,7 +443,7 @@ elif page == "👨‍⚕️ Physician Performance":
         
         phys_stats["Negative_Rate"] = phys_stats["Negative_Rate"] * 100
         
-        # --- Join indicators (Visits / Avg Waiting / Complaints) ---
+        # ---- Join indicators (Visits / Waiting / Complaints) ----
         visits_col = safe_col(phys_f, ["ClinicVisits", "Visits", "TotalVisits"])
         wait_col   = safe_col(phys_f, ["ClinicWaitingTime", "WaitingTime", "AvgWaitingTime"])
         comp_col   = safe_col(phys_f, ["PatientComplaints", "Complaints", "ComplaintCount"])
@@ -454,76 +451,82 @@ elif page == "👨‍⚕️ Physician Performance":
         ind_cols = ["Subject ID"]
         rename_map = {}
         
-        if visits_col: ind_cols.append(visits_col); rename_map[visits_col] = "Visits"
-        if wait_col:   ind_cols.append(wait_col);   rename_map[wait_col] = "Avg_Waiting"
-        if comp_col:   ind_cols.append(comp_col);   rename_map[comp_col] = "Complaints"
+        if visits_col:
+            ind_cols.append(visits_col)
+            rename_map[visits_col] = "Visits"
+        if wait_col:
+            ind_cols.append(wait_col)
+            rename_map[wait_col] = "Avg_Waiting"
+        if comp_col:
+            ind_cols.append(comp_col)
+            rename_map[comp_col] = "Complaints"
         
         if len(ind_cols) > 1 and "Subject ID" in phys_f.columns:
             indicators = phys_f[ind_cols].copy().rename(columns=rename_map)
         
             agg_dict = {}
-            if "Visits" in indicators.columns: agg_dict["Visits"] = "sum"
-            if "Avg_Waiting" in indicators.columns: agg_dict["Avg_Waiting"] = "mean"
-            if "Complaints" in indicators.columns: agg_dict["Complaints"] = "sum"
+            if "Visits" in indicators.columns:
+                agg_dict["Visits"] = "sum"
+            if "Avg_Waiting" in indicators.columns:
+                agg_dict["Avg_Waiting"] = "mean"
+            if "Complaints" in indicators.columns:
+                agg_dict["Complaints"] = "sum"
         
             indicators = indicators.groupby("Subject ID", as_index=False).agg(agg_dict)
             phys_stats = phys_stats.merge(indicators, on="Subject ID", how="left")
         
-        # --- Formatting ---
-        for c in ["Avg_Score", "Std_Score"]:
-            if c in phys_stats.columns:
-                phys_stats[c] = phys_stats[c].round(2)
-        
-        if "Negative_Rate" in phys_stats.columns:
-            phys_stats["Negative_Rate"] = phys_stats["Negative_Rate"].round(1)
+        # ---- Formatting ----
+        phys_stats["Avg_Score"] = phys_stats["Avg_Score"].round(2)
+        phys_stats["Std_Score"] = phys_stats["Std_Score"].round(2)
+        phys_stats["Negative_Rate"] = phys_stats["Negative_Rate"].round(1)
         
         if "Avg_Waiting" in phys_stats.columns:
             phys_stats["Avg_Waiting"] = phys_stats["Avg_Waiting"].round(1)
         
         # =========================
-        # 1) LINKED SINGLE-ROW TABLE (matches your 2nd screenshot)
+        # 1) LINKED SINGLE-ROW TABLE
         # =========================
         selected_row = phys_stats[phys_stats["Subject ID"] == selected_phys].copy()
         
-        # Ensure all columns exist even if missing indicators
+        # Ensure indicator columns always exist
         for col in ["Visits", "Avg_Waiting", "Complaints"]:
             if col not in selected_row.columns:
                 selected_row[col] = np.nan
         
-        # Order EXACTLY like your screenshot
+        # Column order (UPDATED)
         ordered_cols = [
-            "Evaluations", "Avg_Score", "Std_Score", "Min_Score", "Max_Score",
-            "Negative_Rate", "Comment_Count", "Visits", "Avg_Waiting", "Complaints"
+            "Evaluations",
+            "Avg_Score",
+            "Std_Score",
+            "Negative_Rate",
+            "Comment_Count",
+            "Visits",
+            "Avg_Waiting",
+            "Complaints",
         ]
         
-        # Display wide single-row table
         if selected_row.empty:
             st.info("No statistics available for the selected physician (in the selected years).")
         else:
-            # only show the required columns (no Subject ID in the visible table)
-            summary_row = selected_row[ordered_cols]
-        
             st.dataframe(
-                summary_row,
+                selected_row[ordered_cols],
                 use_container_width=True,
                 hide_index=True
             )
         
         # =========================
-        # 2) OPTIONAL: FULL BENCHMARK TABLE (expander)
+        # 2) OPTIONAL: FULL BENCHMARK TABLE
         # =========================
         with st.expander("📋 Show full benchmark table (all physicians)"):
-            # add Rank + Percentile for context
             tmp = phys_stats.copy().sort_values("Avg_Score", ascending=False).reset_index(drop=True)
             tmp["Rank"] = tmp.index + 1
             tmp["Percentile"] = (1 - (tmp["Rank"] - 1) / max(len(tmp) - 1, 1)) * 100
             tmp["Percentile"] = tmp["Percentile"].round(1)
         
-            search = st.text_input("Search physician ID:", "")
+            search = st.text_input("Search physician ID:")
             if search.strip():
                 tmp = tmp[tmp["Subject ID"].astype(str).str.contains(search.strip(), case=False, na=False)]
         
-            # show clean columns (keeps it readable)
             show_cols = ["Subject ID"] + ordered_cols + ["Rank", "Percentile"]
             show_cols = [c for c in show_cols if c in tmp.columns]
         
