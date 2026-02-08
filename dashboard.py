@@ -438,8 +438,6 @@ elif page == "👨‍⚕️ Physician Performance":
                 Evaluations=("Response_Numeric", "size"),
                 Avg_Score=("Response_Numeric", "mean"),
                 Std_Score=("Response_Numeric", "std"),
-                Min_Score=("Response_Numeric", "min"),
-                Max_Score=("Response_Numeric", "max"),
                 Negative_Rate=("_is_negative", "mean"),
                 Comment_Count=("_has_comment", "sum"),
             )
@@ -472,7 +470,7 @@ elif page == "👨‍⚕️ Physician Performance":
             phys_stats = phys_stats.merge(indicators, on="Subject ID", how="left")
         
         # --- Formatting ---
-        for c in ["Avg_Score", "Std_Score", "Min_Score", "Max_Score"]:
+        for c in ["Avg_Score", "Std_Score"]:
             if c in phys_stats.columns:
                 phys_stats[c] = phys_stats[c].round(2)
         
