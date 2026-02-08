@@ -422,13 +422,14 @@ elif page == "👨‍⚕️ Physician Performance":
         st.plotly_chart(fig_resp, use_container_width=True)
 
     with col2:
-        st.subheader("📌 Selected Physician Summary (Linked to Filter)")
+        st.subheader("📌 Selected Physician Summary")
 
         base = eval_f.copy()
-        base["_has_comment"] = base[comment_col].notna() & (base[comment_col].astype(str).str.strip() != "")
         base["_is_negative"] = base["Response_Numeric"] <= 2
         
-        # Per-physician evaluation stats (NO min/max)
+        # -------------------------
+        # Physician-level statistics
+        # -------------------------
         phys_stats = (
             base.groupby("Subject ID")
             .agg(
@@ -436,14 +437,18 @@ elif page == "👨‍⚕️ Physician Performance":
                 Avg_Score=("Response_Numeric", "mean"),
                 Std_Score=("Response_Numeric", "std"),
                 Negative_Rate=("_is_negative", "mean"),
-                Comment_Count=("_has_comment", "sum"),
             )
             .reset_index()
         )
         
-        phys_stats["Negative_Rate"] = phys_stats["Negative_Rate"] * 100
+        # Format
+        phys_stats["Avg_Score"] = phys_stats["Avg_Score"].round(2)
+        phys_stats["Std_Score"] = phys_stats["Std_Score"].round(2)
+        phys_stats["Negative_Rate"] = (phys_stats["Negative_Rate"] * 100).round(1)
         
-        # ---- Join indicators (Visits / Waiting / Complaints) ----
+        # -------------------------
+        # Join operational indicators
+        # -------------------------
         visits_col = safe_col(phys_f, ["ClinicVisits", "Visits", "TotalVisits"])
         wait_col   = safe_col(phys_f, ["ClinicWaitingTime", "WaitingTime", "AvgWaitingTime"])
         comp_col   = safe_col(phys_f, ["PatientComplaints", "Complaints", "ComplaintCount"])
@@ -475,31 +480,24 @@ elif page == "👨‍⚕️ Physician Performance":
             indicators = indicators.groupby("Subject ID", as_index=False).agg(agg_dict)
             phys_stats = phys_stats.merge(indicators, on="Subject ID", how="left")
         
-        # ---- Formatting ----
-        phys_stats["Avg_Score"] = phys_stats["Avg_Score"].round(2)
-        phys_stats["Std_Score"] = phys_stats["Std_Score"].round(2)
-        phys_stats["Negative_Rate"] = phys_stats["Negative_Rate"].round(1)
+        # Ensure columns always exist
+        for col in ["Visits", "Avg_Waiting", "Complaints"]:
+            if col not in phys_stats.columns:
+                phys_stats[col] = np.nan
         
         if "Avg_Waiting" in phys_stats.columns:
             phys_stats["Avg_Waiting"] = phys_stats["Avg_Waiting"].round(1)
         
-        # =========================
-        # 1) LINKED SINGLE-ROW TABLE
-        # =========================
-        selected_row = phys_stats[phys_stats["Subject ID"] == selected_phys].copy()
+        # -------------------------
+        # Linked single-row display
+        # -------------------------
+        selected_row = phys_stats[phys_stats["Subject ID"] == selected_phys]
         
-        # Ensure indicator columns always exist
-        for col in ["Visits", "Avg_Waiting", "Complaints"]:
-            if col not in selected_row.columns:
-                selected_row[col] = np.nan
-        
-        # Column order (UPDATED)
         ordered_cols = [
             "Evaluations",
             "Avg_Score",
             "Std_Score",
             "Negative_Rate",
-            "Comment_Count",
             "Visits",
             "Avg_Waiting",
             "Complaints",
@@ -513,24 +511,6 @@ elif page == "👨‍⚕️ Physician Performance":
                 use_container_width=True,
                 hide_index=True
             )
-        
-        # =========================
-        # 2) OPTIONAL: FULL BENCHMARK TABLE
-        # =========================
-        with st.expander("📋 Show full benchmark table (all physicians)"):
-            tmp = phys_stats.copy().sort_values("Avg_Score", ascending=False).reset_index(drop=True)
-            tmp["Rank"] = tmp.index + 1
-            tmp["Percentile"] = (1 - (tmp["Rank"] - 1) / max(len(tmp) - 1, 1)) * 100
-            tmp["Percentile"] = tmp["Percentile"].round(1)
-        
-            search = st.text_input("Search physician ID:")
-            if search.strip():
-                tmp = tmp[tmp["Subject ID"].astype(str).str.contains(search.strip(), case=False, na=False)]
-        
-            show_cols = ["Subject ID"] + ordered_cols + ["Rank", "Percentile"]
-            show_cols = [c for c in show_cols if c in tmp.columns]
-        
-            st.dataframe(tmp[show_cols], use_container_width=True, hide_index=True)
 
     st.markdown("---")
     st.subheader("💬 Comment Review (sample)")
