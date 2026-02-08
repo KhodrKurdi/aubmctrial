@@ -422,69 +422,91 @@ elif page == "👨‍⚕️ Physician Performance":
         st.plotly_chart(fig_resp, use_container_width=True)
 
     with col2:
-        st.subheader("⚠️ Lowest-Scoring Questions (Top 10)")
+        st.subheader("📉 Biggest Drop vs Peers (Question Gap vs Department Avg)")
 
-        tmp = dfp.copy()
-        
-        # Create stable Question IDs
-        q_lookup = (
-            tmp[["Question"]]
-            .drop_duplicates()
-            .sort_values("Question")
-            .reset_index(drop=True)
+        # Choose peer scope for the gap
+        peer_scope_gap = st.radio(
+            "Peer baseline for gap:",
+            ["Same Department", "All Physicians"],
+            horizontal=True,
+            key="peer_gap_scope"
         )
-        q_lookup["Q_ID"] = ["Q" + str(i+1).zfill(3) for i in range(len(q_lookup))]
         
-        tmp = tmp.merge(q_lookup, on="Question", how="left")
+        min_n_phys = st.slider(
+            "Minimum responses per question (physician) to include",
+            min_value=3, max_value=30, value=5, step=1
+        )
         
-        # Aggregate
-        qavg = (
-            tmp.groupby(["Q_ID", "Question"])["Response_Numeric"]
-            .agg(mean="mean", count="size")
+        min_n_peers = st.slider(
+            "Minimum responses per question (peers) to include",
+            min_value=10, max_value=200, value=30, step=5
+        )
+        
+        # Determine peer dataframe
+        if peer_scope_gap == "Same Department" and "Department" in dfp.columns:
+            dept_val = dfp["Department"].mode().iloc[0] if dfp["Department"].notna().any() else None
+            peers_df = eval_f[eval_f["Department"] == dept_val] if dept_val is not None else eval_f
+        else:
+            peers_df = eval_f
+        
+        # Physician question-level stats
+        phys_q = (
+            dfp.groupby("Question")["Response_Numeric"]
+            .agg(phys_mean="mean", phys_n="size")
             .reset_index()
         )
         
-        # Keep only statistically meaningful questions
-        qavg = (
-            qavg[qavg["count"] >= 5]
-            .sort_values("mean", ascending=True)
-            .head(10)
+        # Peer question-level stats
+        peer_q = (
+            peers_df.groupby("Question")["Response_Numeric"]
+            .agg(peer_mean="mean", peer_n="size")
+            .reset_index()
         )
         
-        # Horizontal bar chart (clean labels)
-        fig_q = px.bar(
-            qavg,
-            y="Q_ID",
-            x="mean",
-            orientation="h",
-            labels={"mean": "Avg Score", "Q_ID": "Question"},
-            hover_data={
-                "Question": True,
-                "count": True,
-                "mean": ":.2f"
-            }
-        )
+        gap = phys_q.merge(peer_q, on="Question", how="inner")
+        gap = gap[(gap["phys_n"] >= min_n_phys) & (gap["peer_n"] >= min_n_peers)].copy()
         
-        fig_q.update_layout(
-            height=420,
-            showlegend=False,
-            xaxis_range=[0, 5]
-        )
+        if gap.empty:
+            st.info("Not enough data to compute gaps with the current thresholds. Lower the minimum response filters.")
+        else:
+            gap["gap_vs_peers"] = gap["phys_mean"] - gap["peer_mean"]  # negative = worse than peers
+            gap = gap.sort_values("gap_vs_peers").head(10)
         
-        st.plotly_chart(fig_q, use_container_width=True)
+            # Create compact labels (Q001, Q002...) + hover shows full question
+            gap = gap.reset_index(drop=True)
+            gap["Q_ID"] = ["Q" + str(i+1).zfill(3) for i in range(len(gap))]
         
-        # Optional detailed table
-        with st.expander("📋 View full question text"):
-            st.dataframe(
-                qavg[["Q_ID", "Question", "mean", "count"]]
-                .rename(columns={
-                    "mean": "Avg Score",
-                    "count": "Responses"
-                }),
-                use_container_width=True,
-                hide_index=True
+            fig_gap = px.bar(
+                gap,
+                y="Q_ID",
+                x="gap_vs_peers",
+                orientation="h",
+                labels={"gap_vs_peers": "Gap vs Peers (Physician - Peer Avg)", "Q_ID": "Question"},
+                hover_data={
+                    "Question": True,
+                    "phys_mean": ":.2f",
+                    "peer_mean": ":.2f",
+                    "phys_n": True,
+                    "peer_n": True,
+                    "gap_vs_peers": ":.2f",
+                },
             )
-
+            fig_gap.update_layout(height=420, showlegend=False)
+            st.plotly_chart(fig_gap, use_container_width=True)
+        
+            with st.expander("📋 View full details"):
+                st.dataframe(
+                    gap[["Q_ID", "Question", "phys_mean", "peer_mean", "gap_vs_peers", "phys_n", "peer_n"]]
+                    .rename(columns={
+                        "phys_mean": "Phys Avg",
+                        "peer_mean": "Peer Avg",
+                        "gap_vs_peers": "Gap",
+                        "phys_n": "Phys N",
+                        "peer_n": "Peer N",
+                    }),
+                    use_container_width=True,
+                    hide_index=True
+                )
 
     st.markdown("---")
     st.subheader("💬 Comment Review (sample)")
@@ -559,6 +581,69 @@ elif page == "🏢 Department Analytics":
     fig_rg = px.bar(rg, x="Rater Group", y="Count")
     fig_rg.update_layout(height=330, xaxis_tickangle=35, showlegend=False)
     st.plotly_chart(fig_rg, use_container_width=True)
+
+    st.subheader("💬 Top Negative Comment Themes (Keyword Buckets)")
+    
+    # Define keyword buckets (edit anytime)
+    THEMES = {
+        "Communication": ["communicat", "explain", "listen", "clarif", "rude", "respect", "tone"],
+        "Timeliness / Responsiveness": ["late", "delay", "time", "wait", "respond", "response", "paging", "call"],
+        "Professionalism / Conduct": ["professional", "unprofessional", "ethic", "behavior", "attitude", "harass"],
+        "Teamwork / Collaboration": ["team", "cowork", "nurse", "staff", "colleague", "collabor"],
+        "Patient Care / Safety": ["care", "safe", "safety", "mistake", "error", "risk", "quality"],
+        "Empathy / Compassion": ["empath", "compassion", "kind", "caring", "concern", "family"],
+        "Privacy / Confidentiality": ["privacy", "confidential", "hipaa", "overhear", "hallway", "elevator"],
+    }
+    
+    # Choose what counts as "negative"
+    neg_def = st.selectbox(
+        "Define negative comments as:",
+        ["Score <= 2", "Response in (Never/Hardly ever)"],
+        index=0
+    )
+    
+    tmp = dfp.copy()
+    tmp[comment_col] = tmp[comment_col].astype(str)
+    
+    if neg_def == "Score <= 2":
+        neg_comments = tmp[(tmp["Response_Numeric"] <= 2) & (tmp[comment_col].str.strip() != "")]
+    else:
+        neg_comments = tmp[(tmp["Response"].isin(["Never", "Hardly ever"])) & (tmp[comment_col].str.strip() != "")]
+    
+    if neg_comments.empty:
+        st.info("No negative comments found for this physician under the selected definition.")
+    else:
+        text = (neg_comments[comment_col].str.lower()).fillna("")
+    
+        # Count theme hits (simple “contains keyword” logic)
+        theme_counts = []
+        for theme, keys in THEMES.items():
+            hits = np.zeros(len(text), dtype=bool)
+            for k in keys:
+                hits |= text.str.contains(k, regex=False).values
+            theme_counts.append({"Theme": theme, "Mentions": int(hits.sum())})
+    
+        theme_df = pd.DataFrame(theme_counts).sort_values("Mentions", ascending=False)
+    
+        # Remove themes with 0 mentions (optional)
+        theme_df = theme_df[theme_df["Mentions"] > 0]
+    
+        if theme_df.empty:
+            st.info("No theme keywords matched the negative comments. We can refine the keyword list for your dataset wording.")
+        else:
+            fig_theme = px.bar(
+                theme_df,
+                x="Theme",
+                y="Mentions",
+                labels={"Mentions": "Number of Comments (matched)"},
+            )
+            fig_theme.update_layout(height=360, xaxis_tickangle=25, showlegend=False)
+            st.plotly_chart(fig_theme, use_container_width=True)
+    
+            with st.expander("🔎 Show example negative comments (first 15)"):
+                show_cols = ["Year", "Raters Group", "Response", "Response_Numeric", comment_col]
+                st.dataframe(neg_comments[show_cols].head(15), use_container_width=True, hide_index=True)
+    
 
     st.markdown("---")
     show_heatmap = st.checkbox("Show heatmap (slower on large data)")
