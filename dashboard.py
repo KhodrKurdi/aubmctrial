@@ -423,14 +423,68 @@ elif page == "👨‍⚕️ Physician Performance":
 
     with col2:
         st.subheader("⚠️ Lowest-Scoring Questions (Top 10)")
+
         tmp = dfp.copy()
-        tmp["Question_Short"] = tmp["Question"].astype(str).str.replace("_", " ").str[-90:]
-        qavg = tmp.groupby("Question_Short")["Response_Numeric"].agg(["mean", "count"]).reset_index()
-        qavg = qavg[qavg["count"] >= 5].sort_values("mean", ascending=True).head(10)
-        fig_q = px.bar(qavg, y="Question_Short", x="mean", orientation="h",
-                       labels={"mean": "Avg Score", "Question_Short": "Question"})
-        fig_q.update_layout(height=420, showlegend=False)
+        
+        # Create stable Question IDs
+        q_lookup = (
+            tmp[["Question"]]
+            .drop_duplicates()
+            .sort_values("Question")
+            .reset_index(drop=True)
+        )
+        q_lookup["Q_ID"] = ["Q" + str(i+1).zfill(3) for i in range(len(q_lookup))]
+        
+        tmp = tmp.merge(q_lookup, on="Question", how="left")
+        
+        # Aggregate
+        qavg = (
+            tmp.groupby(["Q_ID", "Question"])["Response_Numeric"]
+            .agg(mean="mean", count="size")
+            .reset_index()
+        )
+        
+        # Keep only statistically meaningful questions
+        qavg = (
+            qavg[qavg["count"] >= 5]
+            .sort_values("mean", ascending=True)
+            .head(10)
+        )
+        
+        # Horizontal bar chart (clean labels)
+        fig_q = px.bar(
+            qavg,
+            y="Q_ID",
+            x="mean",
+            orientation="h",
+            labels={"mean": "Avg Score", "Q_ID": "Question"},
+            hover_data={
+                "Question": True,
+                "count": True,
+                "mean": ":.2f"
+            }
+        )
+        
+        fig_q.update_layout(
+            height=420,
+            showlegend=False,
+            xaxis_range=[0, 5]
+        )
+        
         st.plotly_chart(fig_q, use_container_width=True)
+        
+        # Optional detailed table
+        with st.expander("📋 View full question text"):
+            st.dataframe(
+                qavg[["Q_ID", "Question", "mean", "count"]]
+                .rename(columns={
+                    "mean": "Avg Score",
+                    "count": "Responses"
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+
 
     st.markdown("---")
     st.subheader("💬 Comment Review (sample)")
