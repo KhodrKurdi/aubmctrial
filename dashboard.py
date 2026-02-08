@@ -316,15 +316,60 @@ if page == "📊 Overview":
         st.plotly_chart(fig_dept, use_container_width=True)
 
     st.markdown("---")
-    a, b = st.columns(2)
-    with a:
-        if st.button("👨‍⚕️ Go to Physician Performance", use_container_width=True):
-            st.session_state.page = "👨‍⚕️ Physician Performance"
-            st.rerun()
-    with b:
-        if st.button("🏢 Go to Department Analytics", use_container_width=True):
-            st.session_state.page = "🏢 Department Analytics"
-            st.rerun()
+    st.subheader("🚨 Outlier Detection (IQR Method) — Evaluation Scores")
+    
+    # Choose metric for outliers (keep it simple for now)
+    series = eval_f["Response_Numeric"].dropna()
+    
+    if len(series) < 10:
+        st.info("Not enough data points to run IQR outlier detection.")
+    else:
+        q1 = series.quantile(0.25)
+        q3 = series.quantile(0.75)
+        iqr = q3 - q1
+    
+        if iqr == 0:
+            st.info("IQR is 0 (scores are identical). Outlier detection is not meaningful.")
+        else:
+            k = st.slider("IQR multiplier (k)", 1.0, 3.0, 1.5, 0.1, help="Standard is 1.5. Higher = fewer outliers.")
+            lower = q1 - k * iqr
+            upper = q3 + k * iqr
+    
+            outliers = eval_f[(eval_f["Response_Numeric"] < lower) | (eval_f["Response_Numeric"] > upper)].copy()
+            outlier_pct = (len(outliers) / len(eval_f) * 100) if len(eval_f) else 0
+    
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Q1", f"{q1:.2f}")
+            c2.metric("Q3", f"{q3:.2f}")
+            c3.metric("IQR Bounds", f"{lower:.2f} to {upper:.2f}")
+            c4.metric("Outliers", f"{len(outliers):,} ({outlier_pct:.2f}%)")
+    
+            # Box plot (best for IQR)
+            fig_box = px.box(
+                eval_f,
+                y="Response_Numeric",
+                points="outliers",
+                title="Box Plot with IQR Outliers"
+            )
+            fig_box.update_layout(height=320)
+            st.plotly_chart(fig_box, use_container_width=True)
+    
+            # Histogram with cutoff lines
+            fig_hist = px.histogram(
+                eval_f,
+                x="Response_Numeric",
+                nbins=12,
+                title="Score Distribution with IQR Cutoffs"
+            )
+            fig_hist.add_vline(x=lower, line_width=2, line_dash="dash", annotation_text="Lower bound")
+            fig_hist.add_vline(x=upper, line_width=2, line_dash="dash", annotation_text="Upper bound")
+            fig_hist.update_layout(height=320)
+            st.plotly_chart(fig_hist, use_container_width=True)
+    
+            with st.expander("View outlier records (first 50)"):
+                cols = [c for c in ["Year", "Department", "Subject ID", "Raters Group", "Response", "Response_Numeric"] if c in eval_f.columns]
+                st.dataframe(outliers[cols].head(50), use_container_width=True, hide_index=True)
+
 
 elif page == "👨‍⚕️ Physician Performance":
     st.markdown('<div class="main-header">👨‍⚕️ Physician Performance</div>', unsafe_allow_html=True)
