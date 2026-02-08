@@ -422,26 +422,19 @@ elif page == "👨‍⚕️ Physician Performance":
         st.plotly_chart(fig_resp, use_container_width=True)
 
     with col2:
-        st.subheader("📋 Physician Statistics (Benchmark Table)")
+        st.subheader("📌 Selected Physician Summary (Linked to Filter)")
 
-        # Build benchmark table across ALL physicians for selected years
-        base = eval_f.copy()  # eval_f is already filtered by selected years
+        # Build benchmark base
+        base = eval_f.copy()  # already filtered by years
         
-        # Optional: choose which peer scope to show
-        scope = st.radio("Show benchmarks for:", ["All Departments", "Same Department"], horizontal=True)
-        
-        if scope == "Same Department" and "Department" in dfp.columns and dfp["Department"].notna().any():
-            dept_val = dfp["Department"].mode().iloc[0]
-            base = base[base["Department"] == dept_val]
-        
-        # Comments + negative rate fields
+        # Calculate helper flags
         base["_has_comment"] = base[comment_col].notna() & (base[comment_col].astype(str).str.strip() != "")
         base["_is_negative"] = base["Response_Numeric"] <= 2
         
+        # Per-physician eval stats
         phys_stats = (
             base.groupby("Subject ID")
             .agg(
-                Department=("Department", lambda s: s.mode().iloc[0] if s.notna().any() else "Unknown"),
                 Evaluations=("Response_Numeric", "size"),
                 Avg_Score=("Response_Numeric", "mean"),
                 Std_Score=("Response_Numeric", "std"),
@@ -453,72 +446,90 @@ elif page == "👨‍⚕️ Physician Performance":
             .reset_index()
         )
         
-        # Convert Negative_Rate to %
         phys_stats["Negative_Rate"] = phys_stats["Negative_Rate"] * 100
-        phys_stats["Avg_Score"] = phys_stats["Avg_Score"].round(2)
-        phys_stats["Std_Score"] = phys_stats["Std_Score"].round(2)
-        phys_stats["Min_Score"] = phys_stats["Min_Score"].round(2)
-        phys_stats["Max_Score"] = phys_stats["Max_Score"].round(2)
-        phys_stats["Negative_Rate"] = phys_stats["Negative_Rate"].round(1)
         
-        # Optional: join visits / waiting / complaints from physician indicators file
-        # (Only if those columns exist + Subject ID exists in phys_f)
+        # --- Join indicators (Visits / Avg Waiting / Complaints) ---
         visits_col = safe_col(phys_f, ["ClinicVisits", "Visits", "TotalVisits"])
         wait_col   = safe_col(phys_f, ["ClinicWaitingTime", "WaitingTime", "AvgWaitingTime"])
         comp_col   = safe_col(phys_f, ["PatientComplaints", "Complaints", "ComplaintCount"])
         
         ind_cols = ["Subject ID"]
         rename_map = {}
+        
         if visits_col: ind_cols.append(visits_col); rename_map[visits_col] = "Visits"
         if wait_col:   ind_cols.append(wait_col);   rename_map[wait_col] = "Avg_Waiting"
         if comp_col:   ind_cols.append(comp_col);   rename_map[comp_col] = "Complaints"
         
         if len(ind_cols) > 1 and "Subject ID" in phys_f.columns:
             indicators = phys_f[ind_cols].copy().rename(columns=rename_map)
-            # If indicators have multiple rows per physician (e.g., per year), aggregate them
+        
             agg_dict = {}
             if "Visits" in indicators.columns: agg_dict["Visits"] = "sum"
             if "Avg_Waiting" in indicators.columns: agg_dict["Avg_Waiting"] = "mean"
             if "Complaints" in indicators.columns: agg_dict["Complaints"] = "sum"
         
             indicators = indicators.groupby("Subject ID", as_index=False).agg(agg_dict)
-            if "Avg_Waiting" in indicators.columns:
-                indicators["Avg_Waiting"] = indicators["Avg_Waiting"].round(1)
-        
             phys_stats = phys_stats.merge(indicators, on="Subject ID", how="left")
         
-        # Rank + percentile by Avg_Score
-        phys_stats = phys_stats.sort_values("Avg_Score", ascending=False).reset_index(drop=True)
-        phys_stats["Rank"] = phys_stats.index + 1
-        phys_stats["Percentile"] = (1 - (phys_stats["Rank"] - 1) / max(len(phys_stats) - 1, 1)) * 100
-        phys_stats["Percentile"] = phys_stats["Percentile"].round(1)
+        # --- Formatting ---
+        for c in ["Avg_Score", "Std_Score", "Min_Score", "Max_Score"]:
+            if c in phys_stats.columns:
+                phys_stats[c] = phys_stats[c].round(2)
         
-        # Highlight selected physician row (simple UX)
-        selected_id = selected_phys  # you already have this from selectbox
-        highlight_row = phys_stats["Subject ID"] == selected_id
+        if "Negative_Rate" in phys_stats.columns:
+            phys_stats["Negative_Rate"] = phys_stats["Negative_Rate"].round(1)
         
-        # Search box
-        q = st.text_input("Search physician ID (optional):", "")
-        view = phys_stats.copy()
-        if q.strip():
-            view = view[view["Subject ID"].astype(str).str.contains(q.strip(), case=False, na=False)]
+        if "Avg_Waiting" in phys_stats.columns:
+            phys_stats["Avg_Waiting"] = phys_stats["Avg_Waiting"].round(1)
         
-        # Display
-        st.dataframe(
-            view,
-            use_container_width=True,
-            hide_index=True
-        )
+        # =========================
+        # 1) LINKED SINGLE-ROW TABLE (matches your 2nd screenshot)
+        # =========================
+        selected_row = phys_stats[phys_stats["Subject ID"] == selected_phys].copy()
         
-        # Quick selected physician snapshot from table
-        row = phys_stats[phys_stats["Subject ID"] == selected_id]
-        if len(row):
-            r = row.iloc[0]
-            st.info(
-                f"**Selected Physician Benchmark** — Rank **#{int(r['Rank'])}** "
-                f"({r['Percentile']:.1f}th percentile) | Avg Score **{r['Avg_Score']:.2f}** "
-                f"| Negative Rate **{r['Negative_Rate']:.1f}%**"
+        # Ensure all columns exist even if missing indicators
+        for col in ["Visits", "Avg_Waiting", "Complaints"]:
+            if col not in selected_row.columns:
+                selected_row[col] = np.nan
+        
+        # Order EXACTLY like your screenshot
+        ordered_cols = [
+            "Evaluations", "Avg_Score", "Std_Score", "Min_Score", "Max_Score",
+            "Negative_Rate", "Comment_Count", "Visits", "Avg_Waiting", "Complaints"
+        ]
+        
+        # Display wide single-row table
+        if selected_row.empty:
+            st.info("No statistics available for the selected physician (in the selected years).")
+        else:
+            # only show the required columns (no Subject ID in the visible table)
+            summary_row = selected_row[ordered_cols]
+        
+            st.dataframe(
+                summary_row,
+                use_container_width=True,
+                hide_index=True
             )
+        
+        # =========================
+        # 2) OPTIONAL: FULL BENCHMARK TABLE (expander)
+        # =========================
+        with st.expander("📋 Show full benchmark table (all physicians)"):
+            # add Rank + Percentile for context
+            tmp = phys_stats.copy().sort_values("Avg_Score", ascending=False).reset_index(drop=True)
+            tmp["Rank"] = tmp.index + 1
+            tmp["Percentile"] = (1 - (tmp["Rank"] - 1) / max(len(tmp) - 1, 1)) * 100
+            tmp["Percentile"] = tmp["Percentile"].round(1)
+        
+            search = st.text_input("Search physician ID:", "")
+            if search.strip():
+                tmp = tmp[tmp["Subject ID"].astype(str).str.contains(search.strip(), case=False, na=False)]
+        
+            # show clean columns (keeps it readable)
+            show_cols = ["Subject ID"] + ordered_cols + ["Rank", "Percentile"]
+            show_cols = [c for c in show_cols if c in tmp.columns]
+        
+            st.dataframe(tmp[show_cols], use_container_width=True, hide_index=True)
 
     st.markdown("---")
     st.subheader("💬 Comment Review (sample)")
