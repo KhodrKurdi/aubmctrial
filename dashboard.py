@@ -422,71 +422,103 @@ elif page == "👨‍⚕️ Physician Performance":
         st.plotly_chart(fig_resp, use_container_width=True)
 
     with col2:
-        st.subheader("🚨 Outlier Detection (IQR Method) — Score Anomalies")
+        st.subheader("📋 Physician Statistics (Benchmark Table)")
 
-        # Choose the variable to run IQR on (default = Response_Numeric)
-        value_col = st.selectbox(
-            "Detect outliers on:",
-            options=["Response_Numeric"],
-            index=0,
-            help="IQR outlier detection is applied to the selected numeric measure."
+        # Build benchmark table across ALL physicians for selected years
+        base = eval_f.copy()  # eval_f is already filtered by selected years
+        
+        # Optional: choose which peer scope to show
+        scope = st.radio("Show benchmarks for:", ["All Departments", "Same Department"], horizontal=True)
+        
+        if scope == "Same Department" and "Department" in dfp.columns and dfp["Department"].notna().any():
+            dept_val = dfp["Department"].mode().iloc[0]
+            base = base[base["Department"] == dept_val]
+        
+        # Comments + negative rate fields
+        base["_has_comment"] = base[comment_col].notna() & (base[comment_col].astype(str).str.strip() != "")
+        base["_is_negative"] = base["Response_Numeric"] <= 2
+        
+        phys_stats = (
+            base.groupby("Subject ID")
+            .agg(
+                Department=("Department", lambda s: s.mode().iloc[0] if s.notna().any() else "Unknown"),
+                Evaluations=("Response_Numeric", "size"),
+                Avg_Score=("Response_Numeric", "mean"),
+                Std_Score=("Response_Numeric", "std"),
+                Min_Score=("Response_Numeric", "min"),
+                Max_Score=("Response_Numeric", "max"),
+                Negative_Rate=("_is_negative", "mean"),
+                Comment_Count=("_has_comment", "sum"),
+            )
+            .reset_index()
         )
         
-        series = dfp[value_col].dropna()
+        # Convert Negative_Rate to %
+        phys_stats["Negative_Rate"] = phys_stats["Negative_Rate"] * 100
+        phys_stats["Avg_Score"] = phys_stats["Avg_Score"].round(2)
+        phys_stats["Std_Score"] = phys_stats["Std_Score"].round(2)
+        phys_stats["Min_Score"] = phys_stats["Min_Score"].round(2)
+        phys_stats["Max_Score"] = phys_stats["Max_Score"].round(2)
+        phys_stats["Negative_Rate"] = phys_stats["Negative_Rate"].round(1)
         
-        if len(series) < 10:
-            st.info("Not enough data points to run IQR outlier detection (need at least ~10).")
-        else:
-            q1 = series.quantile(0.25)
-            q3 = series.quantile(0.75)
-            iqr = q3 - q1
+        # Optional: join visits / waiting / complaints from physician indicators file
+        # (Only if those columns exist + Subject ID exists in phys_f)
+        visits_col = safe_col(phys_f, ["ClinicVisits", "Visits", "TotalVisits"])
+        wait_col   = safe_col(phys_f, ["ClinicWaitingTime", "WaitingTime", "AvgWaitingTime"])
+        comp_col   = safe_col(phys_f, ["PatientComplaints", "Complaints", "ComplaintCount"])
         
-            # Protect against iqr = 0 (all values identical)
-            if iqr == 0:
-                st.info("IQR is 0 (values are identical). Outlier detection is not meaningful here.")
-            else:
-                k = st.slider("IQR multiplier (k)", 1.0, 3.0, 1.5, 0.1, help="Standard is 1.5. Higher = fewer outliers flagged.")
-                lower = q1 - k * iqr
-                upper = q3 + k * iqr
+        ind_cols = ["Subject ID"]
+        rename_map = {}
+        if visits_col: ind_cols.append(visits_col); rename_map[visits_col] = "Visits"
+        if wait_col:   ind_cols.append(wait_col);   rename_map[wait_col] = "Avg_Waiting"
+        if comp_col:   ind_cols.append(comp_col);   rename_map[comp_col] = "Complaints"
         
-                outliers = dfp[(dfp[value_col] < lower) | (dfp[value_col] > upper)].copy()
-                outlier_count = len(outliers)
-                outlier_pct = (outlier_count / len(dfp) * 100) if len(dfp) else 0
+        if len(ind_cols) > 1 and "Subject ID" in phys_f.columns:
+            indicators = phys_f[ind_cols].copy().rename(columns=rename_map)
+            # If indicators have multiple rows per physician (e.g., per year), aggregate them
+            agg_dict = {}
+            if "Visits" in indicators.columns: agg_dict["Visits"] = "sum"
+            if "Avg_Waiting" in indicators.columns: agg_dict["Avg_Waiting"] = "mean"
+            if "Complaints" in indicators.columns: agg_dict["Complaints"] = "sum"
         
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Q1", f"{q1:.2f}")
-                c2.metric("Q3", f"{q3:.2f}")
-                c3.metric("Lower / Upper Bound", f"{lower:.2f} / {upper:.2f}")
-                c4.metric("Outliers", f"{outlier_count} ({outlier_pct:.1f}%)")
+            indicators = indicators.groupby("Subject ID", as_index=False).agg(agg_dict)
+            if "Avg_Waiting" in indicators.columns:
+                indicators["Avg_Waiting"] = indicators["Avg_Waiting"].round(1)
         
-                # --- Box plot ---
-                fig_box = px.box(
-                    dfp,
-                    y=value_col,
-                    points="outliers",
-                    title="Box Plot with Outliers"
-                )
-                fig_box.update_layout(height=320)
-                st.plotly_chart(fig_box, use_container_width=True)
+            phys_stats = phys_stats.merge(indicators, on="Subject ID", how="left")
         
-                # --- Histogram with IQR bounds ---
-                fig_hist = px.histogram(
-                    dfp,
-                    x=value_col,
-                    nbins=12,
-                    title="Score Distribution with IQR Cutoffs"
-                )
-                fig_hist.add_vline(x=lower, line_width=2, line_dash="dash", annotation_text="Lower bound")
-                fig_hist.add_vline(x=upper, line_width=2, line_dash="dash", annotation_text="Upper bound")
-                fig_hist.update_layout(height=320)
-                st.plotly_chart(fig_hist, use_container_width=True)
+        # Rank + percentile by Avg_Score
+        phys_stats = phys_stats.sort_values("Avg_Score", ascending=False).reset_index(drop=True)
+        phys_stats["Rank"] = phys_stats.index + 1
+        phys_stats["Percentile"] = (1 - (phys_stats["Rank"] - 1) / max(len(phys_stats) - 1, 1)) * 100
+        phys_stats["Percentile"] = phys_stats["Percentile"].round(1)
         
-                # Optional: show outlier rows
-                with st.expander("View outlier records"):
-                    show_cols = ["Year", "Raters Group", "Response", "Response_Numeric", comment_col]
-                    show_cols = [c for c in show_cols if c in dfp.columns]
-                    st.dataframe(outliers[show_cols].sort_values(value_col), use_container_width=True, hide_index=True)
-
+        # Highlight selected physician row (simple UX)
+        selected_id = selected_phys  # you already have this from selectbox
+        highlight_row = phys_stats["Subject ID"] == selected_id
+        
+        # Search box
+        q = st.text_input("Search physician ID (optional):", "")
+        view = phys_stats.copy()
+        if q.strip():
+            view = view[view["Subject ID"].astype(str).str.contains(q.strip(), case=False, na=False)]
+        
+        # Display
+        st.dataframe(
+            view,
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Quick selected physician snapshot from table
+        row = phys_stats[phys_stats["Subject ID"] == selected_id]
+        if len(row):
+            r = row.iloc[0]
+            st.info(
+                f"**Selected Physician Benchmark** — Rank **#{int(r['Rank'])}** "
+                f"({r['Percentile']:.1f}th percentile) | Avg Score **{r['Avg_Score']:.2f}** "
+                f"| Negative Rate **{r['Negative_Rate']:.1f}%**"
+            )
 
     st.markdown("---")
     st.subheader("💬 Comment Review (sample)")
