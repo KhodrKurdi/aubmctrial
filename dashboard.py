@@ -316,61 +316,104 @@ if page == "📊 Overview":
         st.plotly_chart(fig_dept, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("🚨 Outlier Detection (IQR Method) — Evaluation Scores")
+    st.subheader("🎯 Outlier Detection — Funnel Plot (Physician Performance vs Sample Size)")
+
+    # Build physician-level aggregates
+    phys_agg = (
+        eval_f.groupby("Subject ID")
+        .agg(
+            Avg_Score=("Response_Numeric", "mean"),
+            N_Evals=("Response_Numeric", "size")
+        )
+        .reset_index()
+    )
     
-    # Choose metric for outliers (keep it simple for now)
-    series = eval_f["Response_Numeric"].dropna()
+    # Remove very small samples (noise)
+    min_n = st.slider("Minimum evaluations per physician", 5, 50, 10, 5)
+    phys_agg = phys_agg[phys_agg["N_Evals"] >= min_n]
     
-    if len(series) < 10:
-        st.info("Not enough data points to run IQR outlier detection.")
+    if len(phys_agg) < 5:
+        st.info("Not enough physicians after applying minimum evaluation threshold.")
     else:
-        q1 = series.quantile(0.25)
-        q3 = series.quantile(0.75)
-        iqr = q3 - q1
+        # Overall mean
+        mu = phys_agg["Avg_Score"].mean()
     
-        if iqr == 0:
-            st.info("IQR is 0 (scores are identical). Outlier detection is not meaningful.")
-        else:
-            k = st.slider("IQR multiplier (k)", 1.0, 3.0, 1.5, 0.1, help="Standard is 1.5. Higher = fewer outliers.")
-            lower = q1 - k * iqr
-            upper = q3 + k * iqr
+        # Approximate standard error for bounded scores
+        # Using empirical SD for stability
+        sd = phys_agg["Avg_Score"].std(ddof=1)
     
-            outliers = eval_f[(eval_f["Response_Numeric"] < lower) | (eval_f["Response_Numeric"] > upper)].copy()
-            outlier_pct = (len(outliers) / len(eval_f) * 100) if len(eval_f) else 0
+        # 95% control limits
+        phys_agg["SE"] = sd / np.sqrt(phys_agg["N_Evals"])
+        phys_agg["Upper"] = mu + 1.96 * phys_agg["SE"]
+        phys_agg["Lower"] = mu - 1.96 * phys_agg["SE"]
     
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Q1", f"{q1:.2f}")
-            c2.metric("Q3", f"{q3:.2f}")
-            c3.metric("IQR Bounds", f"{lower:.2f} to {upper:.2f}")
-            c4.metric("Outliers", f"{len(outliers):,} ({outlier_pct:.2f}%)")
+        # Identify outliers
+        phys_agg["Outlier"] = np.where(
+            phys_agg["Avg_Score"] > phys_agg["Upper"], "Above 95%",
+            np.where(phys_agg["Avg_Score"] < phys_agg["Lower"], "Below 95%", "Within")
+        )
     
-            # Box plot (best for IQR)
-            fig_box = px.box(
-                eval_f,
-                y="Response_Numeric",
-                points="outliers",
-                title="Box Plot with IQR Outliers"
-            )
-            fig_box.update_layout(height=320)
-            st.plotly_chart(fig_box, use_container_width=True)
+        # Scatter plot
+        fig = px.scatter(
+            phys_agg,
+            x="N_Evals",
+            y="Avg_Score",
+            color="Outlier",
+            color_discrete_map={
+                "Above 95%": "#2ecc71",
+                "Below 95%": "#e74c3c",
+                "Within": "#3498db"
+            },
+            labels={
+                "N_Evals": "Number of Evaluations",
+                "Avg_Score": "Average Score"
+            },
+            hover_data=["Subject ID", "Avg_Score", "N_Evals"],
+        )
     
-            # Histogram with cutoff lines
-            fig_hist = px.histogram(
-                eval_f,
-                x="Response_Numeric",
-                nbins=12,
-                title="Score Distribution with IQR Cutoffs"
-            )
-            fig_hist.add_vline(x=lower, line_width=2, line_dash="dash", annotation_text="Lower bound")
-            fig_hist.add_vline(x=upper, line_width=2, line_dash="dash", annotation_text="Upper bound")
-            fig_hist.update_layout(height=320)
-            st.plotly_chart(fig_hist, use_container_width=True)
+        # Mean line
+        fig.add_hline(y=mu, line_dash="solid", line_color="blue", annotation_text="Overall Average")
     
-            with st.expander("View outlier records (first 50)"):
-                cols = [c for c in ["Year", "Department", "Subject ID", "Raters Group", "Response", "Response_Numeric"] if c in eval_f.columns]
-                st.dataframe(outliers[cols].head(50), use_container_width=True, hide_index=True)
-
-
+        # Control limits
+        fig.add_scatter(
+            x=phys_agg["N_Evals"],
+            y=phys_agg["Upper"],
+            mode="lines",
+            line=dict(color="orange", dash="dash"),
+            name="95% Upper Limit"
+        )
+        fig.add_scatter(
+            x=phys_agg["N_Evals"],
+            y=phys_agg["Lower"],
+            mode="lines",
+            line=dict(color="orange", dash="dash"),
+            name="95% Lower Limit"
+        )
+    
+        fig.update_layout(
+            height=520,
+            legend_title_text="Performance Band"
+        )
+    
+        st.plotly_chart(fig, use_container_width=True)
+    
+        # Summary metrics
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Physicians Analyzed", len(phys_agg))
+        c2.metric("Above 95% Limit", (phys_agg["Outlier"] == "Above 95%").sum())
+        c3.metric("Below 95% Limit", (phys_agg["Outlier"] == "Below 95%").sum())
+    
+        with st.expander("📋 View outlier physicians"):
+            outliers = phys_agg[phys_agg["Outlier"] != "Within"]
+            if outliers.empty:
+                st.info("No physicians outside 95% control limits.")
+            else:
+                st.dataframe(
+                    outliers.sort_values("Avg_Score"),
+                    use_container_width=True,
+                    hide_index=True
+                )
+    
 elif page == "👨‍⚕️ Physician Performance":
     st.markdown('<div class="main-header">👨‍⚕️ Physician Performance</div>', unsafe_allow_html=True)
     st.markdown('<div class="subtle">Filter by physician + year(s) to review trends, percentile ranking, and comments.</div>', unsafe_allow_html=True)
