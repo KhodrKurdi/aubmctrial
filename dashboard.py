@@ -501,6 +501,14 @@ elif page == "👨‍⚕️ Physician Performance":
     # Distribution + Lowest questions
     col1, col2 = st.columns(2)
     with col1:
+        st.subheader("📊 Response Distribution")
+        order = ["Always", "Most of the time", "Sometimes", "Hardly ever", "Never"]
+        rc = dfp["Response"].value_counts()
+        rc = rc.reindex([x for x in order if x in rc.index])
+        fig_resp = px.bar(x=rc.index, y=rc.values, labels={"x": "Response", "y": "Count"})
+        fig_resp.update_layout(height=340, showlegend=False)
+        st.plotly_chart(fig_resp, use_container_width=True)
+    with col2:
         st.markdown("### 😊 Sentiment Distribution (Based on Score)")
 
         # Use only rows for this physician (dfp) + only comments (optional)
