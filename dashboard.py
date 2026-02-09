@@ -501,101 +501,46 @@ elif page == "👨‍⚕️ Physician Performance":
     # Distribution + Lowest questions
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("📊 Response Distribution")
-        order = ["Always", "Most of the time", "Sometimes", "Hardly ever", "Never"]
-        rc = dfp["Response"].value_counts()
-        rc = rc.reindex([x for x in order if x in rc.index])
-        fig_resp = px.bar(x=rc.index, y=rc.values, labels={"x": "Response", "y": "Count"})
-        fig_resp.update_layout(height=340, showlegend=False)
-        st.plotly_chart(fig_resp, use_container_width=True)
+        st.markdown("### 😊 Sentiment Distribution (Based on Score)")
 
-    with col2:
-        st.subheader("📌 Selected Physician Summary")
-
-        base = eval_f.copy()
+        # Use only rows for this physician (dfp) + only comments (optional)
+        use_only_commented = st.checkbox("Use only records with comments", value=True)
         
-        # -------------------------
-        # Physician-level statistics
-        # -------------------------
-        phys_stats = (
-            base.groupby("Subject ID")
-            .agg(
-                Evaluations=("Response_Numeric", "size"),
-                Avg_Score=("Response_Numeric", "mean"),
-                Std_Score=("Response_Numeric", "std"),
-            )
-            .reset_index()
-        )
+        sent_df = dfp.copy()
+        sent_df[comment_col] = sent_df[comment_col].astype(str)
         
-        # Format
-        phys_stats["Avg_Score"] = phys_stats["Avg_Score"].round(2)
-        phys_stats["Std_Score"] = phys_stats["Std_Score"].round(2)
+        if use_only_commented:
+            sent_df = sent_df[sent_df[comment_col].str.strip() != ""]
         
-        # -------------------------
-        # Join operational indicators
-        # -------------------------
-        visits_col = safe_col(phys_f, ["ClinicVisits", "Visits", "TotalVisits"])
-        wait_col   = safe_col(phys_f, ["ClinicWaitingTime", "WaitingTime", "AvgWaitingTime"])
-        comp_col   = safe_col(phys_f, ["PatientComplaints", "Complaints", "ComplaintCount"])
-        
-        ind_cols = ["Subject ID"]
-        rename_map = {}
-        
-        if visits_col:
-            ind_cols.append(visits_col)
-            rename_map[visits_col] = "Visits"
-        if wait_col:
-            ind_cols.append(wait_col)
-            rename_map[wait_col] = "Avg_Waiting"
-        if comp_col:
-            ind_cols.append(comp_col)
-            rename_map[comp_col] = "Complaints"
-        
-        if len(ind_cols) > 1 and "Subject ID" in phys_f.columns:
-            indicators = phys_f[ind_cols].copy().rename(columns=rename_map)
-        
-            agg_dict = {}
-            if "Visits" in indicators.columns:
-                agg_dict["Visits"] = "sum"
-            if "Avg_Waiting" in indicators.columns:
-                agg_dict["Avg_Waiting"] = "mean"
-            if "Complaints" in indicators.columns:
-                agg_dict["Complaints"] = "sum"
-        
-            indicators = indicators.groupby("Subject ID", as_index=False).agg(agg_dict)
-            phys_stats = phys_stats.merge(indicators, on="Subject ID", how="left")
-        
-        # Ensure indicator columns always exist
-        for col in ["Visits", "Avg_Waiting", "Complaints"]:
-            if col not in phys_stats.columns:
-                phys_stats[col] = np.nan
-        
-        if "Avg_Waiting" in phys_stats.columns:
-            phys_stats["Avg_Waiting"] = phys_stats["Avg_Waiting"].round(1)
-        
-        # -------------------------
-        # Linked single-row display
-        # -------------------------
-        selected_row = phys_stats[phys_stats["Subject ID"] == selected_phys]
-        
-        ordered_cols = [
-            "Evaluations",
-            "Avg_Score",
-            "Std_Score",
-            "Visits",
-            "Avg_Waiting",
-            "Complaints",
-        ]
-        
-        if selected_row.empty:
-            st.info("No statistics available for the selected physician (in the selected years).")
+        if sent_df.empty:
+            st.info("No comment records available for this physician to compute sentiment distribution.")
         else:
-            st.dataframe(
-                selected_row[ordered_cols],
-                use_container_width=True,
-                hide_index=True
-            )
+            # Define sentiment buckets using Response_Numeric
+            def bucket(score):
+                if score >= 4:
+                    return "Positive"
+                elif score == 3:
+                    return "Neutral"
+                else:
+                    return "Negative"
         
+            sent_df["Sentiment"] = sent_df["Response_Numeric"].apply(bucket)
+        
+            counts = sent_df["Sentiment"].value_counts().reindex(["Positive", "Neutral", "Negative"]).fillna(0).astype(int)
+        
+            fig_pie = px.pie(
+                values=counts.values,
+                names=counts.index,
+                hole=0.45
+            )
+            fig_pie.update_layout(height=300, margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig_pie, use_container_width=True)
+        
+            # Optional small metrics
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Positive", int(counts.get("Positive", 0)))
+            c2.metric("Neutral", int(counts.get("Neutral", 0)))
+            c3.metric("Negative", int(counts.get("Negative", 0)))
 
     st.markdown("---")
     st.subheader("💬 Comment Review (sample)")
