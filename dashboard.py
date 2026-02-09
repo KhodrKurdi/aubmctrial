@@ -641,23 +641,45 @@ elif page == "🏢 Department Analytics":
     st.markdown("---")
 
     if selected_dept == "All Departments":
-        st.subheader("🏥 Department Snapshot (All) — Avg Score with Quartile Gaps")
+        st.subheader("🏥 Department Snapshot — Avg Score")
 
-        # 1) Compute department averages
+        # =========================
+        # Percentile filter
+        # =========================
+        pct = st.slider(
+            "Show top X% of departments",
+            min_value=25,
+            max_value=100,
+            value=100,
+            step=5,
+            help="Departments are ranked by Avg Score (descending)"
+        )
+        
+        # =========================
+        # Compute department averages
+        # =========================
         dept_avg = (
             eval_f.groupby("Department")["Response_Numeric"]
             .mean()
             .reset_index(name="Avg_Score")
-            .sort_values("Avg_Score", ascending=False)
-            .reset_index(drop=True)
         )
         
         if dept_avg.empty:
             st.info("No department data available.")
         else:
-            # 2) Assign quartiles by rank position (top 25%, next 25%, etc.)
+            # Sort descending (BEST → WORST)
+            dept_avg = dept_avg.sort_values("Avg_Score", ascending=False).reset_index(drop=True)
+        
+            # Keep only top X%
+            cutoff = int(np.ceil(len(dept_avg) * pct / 100))
+            dept_avg = dept_avg.iloc[:cutoff].copy()
+        
+            # =========================
+            # Quartiles by rank position
+            # =========================
             n = len(dept_avg)
             dept_avg["Rank"] = np.arange(1, n + 1)
+        
             dept_avg["Quartile"] = pd.cut(
                 dept_avg["Rank"],
                 bins=[0, int(np.ceil(n*0.25)), int(np.ceil(n*0.50)), int(np.ceil(n*0.75)), n],
@@ -665,52 +687,55 @@ elif page == "🏢 Department Analytics":
                 include_lowest=True
             )
         
-            # 3) Insert spacer rows after each quartile to create visible gaps
+            # =========================
+            # Insert spacer rows for gaps
+            # =========================
             pieces = []
             for q in ["Top 25%", "25–50%", "50–75%", "Bottom 25%"]:
-                block = dept_avg[dept_avg["Quartile"] == q].copy()
-                pieces.append(block)
-        
-                # spacer row (no bar, only creates spacing)
-                spacer = pd.DataFrame([{
-                    "Department": " ",      # blank label
-                    "Avg_Score": np.nan,    # no bar
-                    "Quartile": q
-                }])
-                pieces.append(spacer)
+                block = dept_avg[dept_avg["Quartile"] == q]
+                if not block.empty:
+                    pieces.append(block)
+                    pieces.append(pd.DataFrame([{
+                        "Department": " ",     # spacer
+                        "Avg_Score": np.nan,
+                        "Quartile": q
+                    }]))
         
             plot_df = pd.concat(pieces, ignore_index=True)
         
-            # 4) Make y category order stable (keeps sorted order + gaps)
+            # Stable y-axis order
             y_order = plot_df["Department"].tolist()
         
-            # 5) Plot (horizontal + gradient)
+            # =========================
+            # Plot
+            # =========================
             fig = px.bar(
                 plot_df,
                 y="Department",
                 x="Avg_Score",
                 orientation="h",
-                color="Avg_Score",                 # continuous gradient
-                color_continuous_scale="Blues",    # change if you want
+                color="Avg_Score",
+                color_continuous_scale="Blues",   # swap to RdYlGn if you want
                 category_orders={"Department": y_order},
                 labels={"Avg_Score": "Avg Score", "Department": ""},
                 hover_data={"Quartile": True},
             )
         
-            # Better readability
             fig.update_layout(
                 showlegend=False,
-                height=max(520, 18 * len(y_order)),  # auto-height for many departments
+                height=max(520, 18 * len(y_order)),
                 margin=dict(l=10, r=10, t=40, b=10),
-                yaxis=dict(autorange="reversed"),    # top at top
+                yaxis=dict(autorange="reversed"),  # best at top
             )
         
-            # Optional: make bars thinner so spacing looks clean
             fig.update_traces(marker_line_width=0)
         
             st.plotly_chart(fig, use_container_width=True)
         
-            st.caption("Gaps indicate quartile boundaries (Top 25%, 25–50%, 50–75%, Bottom 25%).")
+            st.caption(
+                f"Departments ranked by average score (descending). "
+                f"Gaps indicate quartile boundaries. Showing top {pct}%."
+            )
 
     st.subheader("📈 Score Trend by Year")
     yoy = dfd.groupby("Year")["Response_Numeric"].mean().reset_index()
