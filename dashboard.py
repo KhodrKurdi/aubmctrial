@@ -725,7 +725,7 @@ elif page == "🏢 Department Analytics":
                 showlegend=False,
                 height=max(520, 18 * len(y_order)),
                 margin=dict(l=10, r=10, t=40, b=10),
-                yaxis=dict(autorange="reversed"),  # best at top
+                yaxis=dict(autorange=True),  # best at top
             )
         
             fig.update_traces(marker_line_width=0)
