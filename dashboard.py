@@ -641,22 +641,34 @@ elif page == "🏢 Department Analytics":
     st.markdown("---")
 
     if selected_dept == "All Departments":
-        st.subheader("🏆 Department Performance Comparison")
-        dept_perf = eval_f.groupby("Department").agg(
-            Avg_Score=("Response_Numeric", "mean"),
-            Evaluations=("Response_Numeric", "size"),
-            Physicians=("Subject ID", "nunique"),
-        ).reset_index().sort_values("Avg_Score", ascending=False)
+        st.subheader("🏥 Department Snapshot (Avg Score)")
 
-        fig_dept = px.bar(
-            dept_perf,
-            x="Department",
-            y="Avg_Score",
-            hover_data=["Evaluations", "Physicians"],
+        dept_avg = (
+            eval_f.groupby("Department")["Response_Numeric"]
+            .mean()
+            .reset_index(name="Avg_Score")
+            .sort_values("Avg_Score", ascending=False)
+        )
+        
+        mode = st.radio("View:", ["Top 10", "Bottom 10", "Top & Bottom 10"], horizontal=True)
+        
+        if mode == "Top 10":
+            show = dept_avg.head(10)
+        elif mode == "Bottom 10":
+            show = dept_avg.tail(10).sort_values("Avg_Score", ascending=True)
+        else:
+            show = pd.concat([dept_avg.head(10), dept_avg.tail(10)]).sort_values("Avg_Score", ascending=True)
+        
+        fig = px.bar(
+            show,
+            y="Department",
+            x="Avg_Score",
+            orientation="h",
             labels={"Avg_Score": "Avg Score"},
         )
-        fig_dept.update_layout(height=420, xaxis_tickangle=35, showlegend=False)
-        st.plotly_chart(fig_dept, use_container_width=True)
+        fig.update_layout(height=520, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+
 
     st.subheader("📈 Score Trend by Year")
     yoy = dfd.groupby("Year")["Response_Numeric"].mean().reset_index()
