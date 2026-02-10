@@ -316,86 +316,73 @@ if page == "📊 Overview":
         st.plotly_chart(fig_dept, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("🎯 Outlier Detection — Funnel Plot (Physician Performance vs Sample Size)")
-
-    # Build physician-level aggregates
+    st.subheader("🎯 Outlier Detection — Funnel Plot (Physician Performance vs Sample Size)")    
+    min_n = st.slider("Minimum evaluations per physician", 5, 50, 10, 5)
+    z = st.selectbox("Control limit", [("95% (z=1.96)", 1.96), ("99.7% (z=3.0)", 3.0)], index=0)[1]
+    
+    # Physician aggregates
     phys_agg = (
         eval_f.groupby("Subject ID")
-        .agg(
-            Avg_Score=("Response_Numeric", "mean"),
-            N_Evals=("Response_Numeric", "size")
-        )
+        .agg(Avg_Score=("Response_Numeric", "mean"),
+             N_Evals=("Response_Numeric", "size"))
         .reset_index()
     )
     
-    # Remove very small samples (noise)
-    min_n = st.slider("Minimum evaluations per physician", 5, 50, 10, 5)
-    phys_agg = phys_agg[phys_agg["N_Evals"] >= min_n]
+    phys_agg = phys_agg[phys_agg["N_Evals"] >= min_n].copy()
     
     if len(phys_agg) < 5:
-        st.info("Not enough physicians after applying minimum evaluation threshold.")
+        st.info("Not enough physicians after the minimum-evaluations filter.")
     else:
-        # Overall mean
-        mu = phys_agg["Avg_Score"].mean()
+        # Use evaluation-level mean and SD (correct for sampling error)
+        overall = eval_f["Response_Numeric"].dropna()
+        mu = float(overall.mean())
+        sigma = float(overall.std(ddof=1))
     
-        # Approximate standard error for bounded scores
-        # Using empirical SD for stability
-        sd = phys_agg["Avg_Score"].std(ddof=1)
+        # SE and limits
+        phys_agg["SE"] = sigma / np.sqrt(phys_agg["N_Evals"])
+        phys_agg["Upper"] = mu + z * phys_agg["SE"]
+        phys_agg["Lower"] = mu - z * phys_agg["SE"]
     
-        # 95% control limits
-        phys_agg["SE"] = sd / np.sqrt(phys_agg["N_Evals"])
-        phys_agg["Upper"] = mu + 1.96 * phys_agg["SE"]
-        phys_agg["Lower"] = mu - 1.96 * phys_agg["SE"]
+        # Clip to score bounds (optional but nice for Likert)
+        phys_agg["Upper"] = phys_agg["Upper"].clip(1, 5)
+        phys_agg["Lower"] = phys_agg["Lower"].clip(1, 5)
     
-        # Identify outliers
+        # Outlier flag
         phys_agg["Outlier"] = np.where(
-            phys_agg["Avg_Score"] > phys_agg["Upper"], "Above 95%",
-            np.where(phys_agg["Avg_Score"] < phys_agg["Lower"], "Below 95%", "Within")
+            phys_agg["Avg_Score"] > phys_agg["Upper"], "Above limit",
+            np.where(phys_agg["Avg_Score"] < phys_agg["Lower"], "Below limit", "Within")
         )
     
-        # Scatter plot
+        # Sort by N for smooth limit lines
+        phys_agg = phys_agg.sort_values("N_Evals")
+    
         fig = px.scatter(
             phys_agg,
             x="N_Evals",
             y="Avg_Score",
             color="Outlier",
-            color_discrete_map={
-                "Above 95%": "#2ecc71",
-                "Below 95%": "#e74c3c",
-                "Within": "#3498db"
-            },
-            labels={
-                "N_Evals": "Number of Evaluations",
-                "Avg_Score": "Average Score"
-            },
-            hover_data=["Subject ID", "Avg_Score", "N_Evals"],
+            hover_data=["Subject ID", "N_Evals", "Avg_Score"],
+            labels={"N_Evals": "# Evaluations", "Avg_Score": "Physician Avg Score"},
         )
     
-        # Mean line
-        fig.add_hline(y=mu, line_dash="solid", line_color="blue", annotation_text="Overall Average")
+        fig.add_hline(y=mu, line_dash="solid", annotation_text="Overall mean")
     
-        # Control limits
-        fig.add_scatter(
-            x=phys_agg["N_Evals"],
-            y=phys_agg["Upper"],
-            mode="lines",
-            line=dict(color="orange", dash="dash"),
-            name="95% Upper Limit"
-        )
-        fig.add_scatter(
-            x=phys_agg["N_Evals"],
-            y=phys_agg["Lower"],
-            mode="lines",
-            line=dict(color="orange", dash="dash"),
-            name="95% Lower Limit"
-        )
+        fig.add_trace(go.Scatter(
+            x=phys_agg["N_Evals"], y=phys_agg["Upper"],
+            mode="lines", name="Upper limit", line=dict(dash="dash")
+        ))
+        fig.add_trace(go.Scatter(
+            x=phys_agg["N_Evals"], y=phys_agg["Lower"],
+            mode="lines", name="Lower limit", line=dict(dash="dash")
+        ))
     
-        fig.update_layout(
-            height=520,
-            legend_title_text="Performance Band"
-        )
-    
+        fig.update_layout(height=520)
         st.plotly_chart(fig, use_container_width=True)
+    
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Physicians shown", len(phys_agg))
+        c2.metric("Above limit", int((phys_agg["Outlier"] == "Above limit").sum()))
+        c3.metric("Below limit", int((phys_agg["Outlier"] == "Below limit").sum()))
     
         # Summary metrics
         c1, c2, c3 = st.columns(3)
