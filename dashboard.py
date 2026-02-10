@@ -750,6 +750,78 @@ elif page == "🏢 Department Analytics":
     fig_rg.update_layout(height=330, xaxis_tickangle=35, showlegend=False)
     st.plotly_chart(fig_rg, use_container_width=True)
 
+    st.subheader("📋 Department Summary Table (All Departments)")
+
+    # --- 1) Evaluation-based department stats ---
+    dept_eval = (
+        eval_f.groupby("Department")
+        .agg(
+            Avg_Score=("Response_Numeric", "mean"),
+            Evaluations=("Response_Numeric", "size"),
+            Physicians=("Subject ID", "nunique"),
+        )
+        .reset_index()
+    )
+    
+    dept_eval["Avg_Score"] = dept_eval["Avg_Score"].round(2)
+    
+    # --- 2) Indicator-based department stats (Visits / Waiting / Complaints) ---
+    visits_col = safe_col(phys_f, ["ClinicVisits", "Visits", "TotalVisits"])
+    wait_col   = safe_col(phys_f, ["ClinicWaitingTime", "WaitingTime", "AvgWaitingTime"])
+    comp_col   = safe_col(phys_f, ["PatientComplaints", "Complaints", "ComplaintCount"])
+    
+    dept_ind = None
+    if "Department" in phys_f.columns:
+        agg_dict = {}
+        if visits_col: agg_dict[visits_col] = "sum"
+        if wait_col:   agg_dict[wait_col]   = "mean"
+        if comp_col:   agg_dict[comp_col]   = "sum"
+    
+        if agg_dict:
+            dept_ind = (
+                phys_f.groupby("Department", dropna=False)
+                .agg(agg_dict)
+                .reset_index()
+            )
+    
+            rename_map = {}
+            if visits_col: rename_map[visits_col] = "Visits"
+            if wait_col:   rename_map[wait_col]   = "Avg_Waiting"
+            if comp_col:   rename_map[comp_col]   = "Complaints"
+            dept_ind = dept_ind.rename(columns=rename_map)
+    
+            if "Avg_Waiting" in dept_ind.columns:
+                dept_ind["Avg_Waiting"] = dept_ind["Avg_Waiting"].round(1)
+    
+    # --- 3) Merge ---
+    dept_table = dept_eval.copy()
+    if dept_ind is not None:
+        dept_table = dept_table.merge(dept_ind, on="Department", how="left")
+    
+    # Ensure columns exist (even if not available)
+    for col in ["Visits", "Avg_Waiting", "Complaints"]:
+        if col not in dept_table.columns:
+            dept_table[col] = np.nan
+    
+    # --- 4) Ordering + filters ---
+    sort_col = st.selectbox(
+        "Sort table by:",
+        ["Avg_Score", "Evaluations", "Physicians", "Visits", "Avg_Waiting", "Complaints"],
+        index=0
+    )
+    ascending = st.checkbox("Ascending", value=False)
+    
+    dept_table = dept_table.sort_values(sort_col, ascending=ascending)
+    
+    search = st.text_input("Search department:", "")
+    if search.strip():
+        dept_table = dept_table[dept_table["Department"].astype(str).str.contains(search.strip(), case=False, na=False)]
+    
+    # --- 5) Display ---
+    show_cols = ["Department", "Avg_Score", "Evaluations", "Physicians", "Visits", "Avg_Waiting", "Complaints"]
+    st.dataframe(dept_table[show_cols], use_container_width=True, hide_index=True)
+
+
     st.markdown("---")
     show_heatmap = st.checkbox("Show heatmap (slower on large data)")
     if show_heatmap:
