@@ -443,14 +443,22 @@ elif page == "👨‍⚕️ Physician Performance":
     neg_rows = dfp[dfp["Response_Numeric"] <= 2]
     neg_rate = pct(len(neg_rows), len(dfp))
 
+    years_count = dfp["Year"].nunique() if "Year" in dfp.columns and len(dfp) else 0
+    ratings_per_year = (len(dfp) / years_count) if years_count > 0 else None
+
+
     # Top KPI row
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    # Top KPI row
+    k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
+    
     k1.metric("Avg Score", f"{dfp['Response_Numeric'].mean():.2f}/5" if len(dfp) else "N/A")
     k2.metric("Evaluations", f"{len(dfp):,}")
-    k3.metric("Total Comments", f"{len(comments):,}")
-    k4.metric("Neg Score Rate", f"{neg_rate:.1f}%")
-    k5.metric("Visits", f"{int(visits_val):,}" if visits_val is not None else "N/A")
-    k6.metric("Avg Waiting", fmt_num(wait_val, 1) if wait_val is not None else "N/A")
+    k3.metric("Ratings / Year", f"{ratings_per_year:.0f}" if ratings_per_year is not None else "N/A")
+    k4.metric("Total Comments", f"{len(comments):,}")
+    k5.metric("Neg Score Rate", f"{neg_rate:.1f}%")
+    k6.metric("Visits", f"{int(visits_val):,}" if visits_val is not None else "N/A")
+    k7.metric("Avg Waiting", fmt_num(wait_val, 1) if wait_val is not None else "N/A")
+
 
     st.markdown("---")
 
