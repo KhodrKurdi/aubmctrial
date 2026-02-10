@@ -384,12 +384,6 @@ if page == "📊 Overview":
         c2.metric("Above limit", int((phys_agg["Outlier"] == "Above limit").sum()))
         c3.metric("Below limit", int((phys_agg["Outlier"] == "Below limit").sum()))
     
-        # Summary metrics
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Physicians Analyzed", len(phys_agg))
-        c2.metric("Above 95% Limit", (phys_agg["Outlier"] == "Above 95%").sum())
-        c3.metric("Below 95% Limit", (phys_agg["Outlier"] == "Below 95%").sum())
-    
         with st.expander("📋 View outlier physicians"):
             outliers = phys_agg[phys_agg["Outlier"] != "Within"]
             if outliers.empty:
