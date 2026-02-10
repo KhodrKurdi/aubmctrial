@@ -427,6 +427,20 @@ elif page == "👨‍⚕️ Physician Performance":
     selected_phys = st.sidebar.selectbox("Physician", physicians_list)
 
     dfp = eval_f[eval_f["Subject ID"] == selected_phys].copy()
+    
+    # Number of people who rated this physician (unique raters)
+    rater_id_col = "Completed by" if "Completed by" in dfp.columns else None
+    rater_name_col = "Rater Name" if "Rater Name" in dfp.columns else None
+    
+    if rater_id_col:
+        people_rated = dfp[rater_id_col].dropna().astype(str).str.strip()
+        people_rated_count = people_rated[people_rated != ""].nunique()
+    elif rater_name_col:
+        people_rated = dfp[rater_name_col].dropna().astype(str).str.strip()
+        people_rated_count = people_rated[people_rated != ""].nunique()
+    else:
+        people_rated_count = None
+
 
     # Indicators for this physician (visits/waiting/complaints)
     phys_row = phys_f[phys_f["Subject ID"] == selected_phys].copy()
@@ -467,10 +481,8 @@ elif page == "👨‍⚕️ Physician Performance":
         f"{len(dfp):,}"
     )
     
-    k3.metric(
-        "People Rated",
-        f"{people_rated_count:,}" if people_rated_count is not None else "N/A"
-    )
+    k3.metric("People Rated", f"{people_rated_count:,}" if people_rated_count is not None else "N/A")
+
     
     k4.metric(
         "Total Comments",
