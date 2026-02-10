@@ -443,8 +443,12 @@ elif page == "👨‍⚕️ Physician Performance":
     neg_rows = dfp[dfp["Response_Numeric"] <= 2]
     neg_rate = pct(len(neg_rows), len(dfp))
 
-    years_count = dfp["Year"].nunique() if "Year" in dfp.columns and len(dfp) else 0
-    ratings_per_year = (len(dfp) / years_count) if years_count > 0 else None
+    distinct_raters = (
+        dfp["Raters Group"].nunique()
+        if "Raters Group" in dfp.columns and len(dfp)
+        else None
+    )
+
 
 
     # Top KPI row
@@ -453,7 +457,7 @@ elif page == "👨‍⚕️ Physician Performance":
     
     k1.metric("Avg Score", f"{dfp['Response_Numeric'].mean():.2f}/5" if len(dfp) else "N/A")
     k2.metric("Evaluations", f"{len(dfp):,}")
-    k3.metric("Ratings / Year", f"{ratings_per_year:.0f}" if ratings_per_year is not None else "N/A")
+    k3.metric("Distinct Raters", f"{distinct_raters:,}" if distinct_raters is not None else "N/A")
     k4.metric("Total Comments", f"{len(comments):,}")
     k5.metric("Neg Score Rate", f"{neg_rate:.1f}%")
     k6.metric("Visits", f"{int(visits_val):,}" if visits_val is not None else "N/A")
