@@ -467,9 +467,7 @@ elif page == "👨‍⚕️ Physician Performance":
 
 
     # Top KPI row
-    # Top KPI row
-    # Top KPI row
-    k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
     
     k1.metric(
         "Avg Score",
@@ -481,25 +479,22 @@ elif page == "👨‍⚕️ Physician Performance":
         f"{len(dfp):,}"
     )
     
-    k3.metric("People Rated", f"{people_rated_count:,}" if people_rated_count is not None else "N/A")
-
-    
-    k4.metric(
+    k3.metric(
         "Total Comments",
         f"{len(comments):,}"
     )
     
-    k5.metric(
+    k4.metric(
         "Visits",
         f"{int(visits_val):,}" if visits_val is not None else "N/A"
     )
     
-    k6.metric(
+    k5.metric(
         "Avg Waiting",
         fmt_num(wait_val, 1) if wait_val is not None else "N/A"
     )
     
-    k7.metric(
+    k6.metric(
         "Years Rated",
         dfp["Year"].nunique() if "Year" in dfp.columns else "N/A"
     )
