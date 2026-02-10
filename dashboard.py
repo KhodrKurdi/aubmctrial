@@ -456,7 +456,7 @@ elif page == "👨‍⚕️ Physician Performance":
     k1, k2, k3, k4, k5, k6 = st.columns(6)
 
     k1.metric("Avg Score", f"{dfp['Response_Numeric'].mean():.2f}/5" if len(dfp) else "N/A")
-    k2.metric("Total Ratings", f"{len(dfp):,}")   # renamed from Evaluations
+    k2.metric("Total Questions", f"{len(dfp):,}")   # renamed from Evaluations
     k3.metric("Total Comments", f"{len(comments):,}")
     k4.metric("Visits", f"{int(visits_val):,}" if visits_val is not None else "N/A")
     k5.metric("Avg Waiting", fmt_num(wait_val, 1) if wait_val is not None else "N/A")
